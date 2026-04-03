@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MarineOps — Global Vessel Tracker</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow:wght@400;500&display=swap');
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #060a0f;
+      color: #c8d8e8;
+      font-family: 'Barlow', sans-serif;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── Top HUD ── */
+    #hud {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 20px;
+      background: #070c12;
+      border-bottom: 1px solid #0e2035;
+      flex-shrink: 0;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    #hud-logo {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 15px;
+      color: #1de9b6;
+      letter-spacing: 2px;
+    }
+
+    #hud-stats {
+      display: flex;
+      gap: 24px;
+    }
+
+    .stat { text-align: center; }
+    .stat .val {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 18px;
+      color: #1de9b6;
+    }
+    .stat .lbl {
+      font-size: 10px;
+      color: #3a6080;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+
+    #hud-right {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 4px;
+    }
+
+    #hud-time {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 12px;
+      color: #3a6080;
+    }
+
+    #conn-status {
+      font-size: 11px;
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-family: 'Share Tech Mono', monospace;
+      letter-spacing: 1px;
+    }
+    #conn-status.connecting { background: #1a1200; color: #f59e0b; border: 1px solid #f59e0b44; }
+    #conn-status.live       { background: #001a12; color: #1de9b6; border: 1px solid #1de9b644; }
+    #conn-status.error      { background: #1a0000; color: #f87171; border: 1px solid #f8717144; }
+
+    /* ── Map ── */
+    #map {
+      flex: 1;
+      position: relative;
+    }
+
+    #map-el {
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Leaflet dark override */
+    .leaflet-tile { filter: brightness(0.18) saturate(0.4) hue-rotate(180deg); }
+    .leaflet-control-attribution { display: none; }
+    .leaflet-control-zoom a {
+      background: #0d1a25 !important;
+      color: #1de9b6 !important;
+      border-color: #0e2035 !important;
+    }
+
+    /* Grid overlay */
+    #grid-overlay {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(29,233,182,0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(29,233,182,0.025) 1px, transparent 1px);
+      background-size: 60px 60px;
+      z-index: 500;
+    }
+
+    /* Scan line */
+    #scan-line {
+      position: absolute;
+      left: 0; right: 0;
+      height: 1px;
+      background: rgba(29,233,182,0.25);
+      pointer-events: none;
+      z-index: 501;
+      animation: scan 6s linear infinite;
+    }
+    @keyframes scan { 0%{top:0} 100%{top:100%} }
+
+    /* ── Ship marker ── */
+    .ship-marker svg { overflow: visible; }
+
+    /* ── Popup ── */
+    .leaflet-popup-content-wrapper {
+      background: #07131f;
+      border: 1px solid #1de9b640;
+      border-radius: 8px;
+      color: #c8d8e8;
+      box-shadow: none;
+    }
+    .leaflet-popup-tip { background: #07131f; }
+    .leaflet-popup-content { margin: 10px 14px; min-width: 180px; }
+    .popup-name {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 13px;
+      color: #1de9b6;
+      margin-bottom: 8px;
+      border-bottom: 1px solid #0e2035;
+      padding-bottom: 6px;
+    }
+    .popup-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: #6a9ab8;
+      margin-top: 4px;
+    }
+    .popup-row span:last-child { color: #c8d8e8; }
+
+    /* ── Legend ── */
+    #legend {
+      position: absolute;
+      bottom: 24px;
+      left: 12px;
+      z-index: 1000;
+      background: #070c12dd;
+      border: 1px solid #0e2035;
+      border-radius: 8px;
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .leg-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      color: #3a6080;
+      letter-spacing: 0.5px;
+    }
+    .leg-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    /* ── Log bar ── */
+    #log-bar {
+      background: #070c12;
+      border-top: 1px solid #0e2035;
+      padding: 6px 16px;
+      height: 46px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      flex-shrink: 0;
+    }
+    .log-entry {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 10px;
+      color: #2a5040;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      transition: color 1s;
+    }
+    .log-entry.fresh { color: #1de9b6; }
+
+    /* API key overlay */
+    #apikey-overlay {
+      position: absolute;
+      inset: 0;
+      background: #060a0fdd;
+      z-index: 2000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #apikey-box {
+      background: #07131f;
+      border: 1px solid #1de9b640;
+      border-radius: 12px;
+      padding: 28px 32px;
+      max-width: 400px;
+      width: 90%;
+      text-align: center;
+    }
+    #apikey-box h2 {
+      font-family: 'Share Tech Mono', monospace;
+      color: #1de9b6;
+      font-size: 16px;
+      margin-bottom: 10px;
+      letter-spacing: 2px;
+    }
+    #apikey-box p {
+      font-size: 13px;
+      color: #6a9ab8;
+      margin-bottom: 18px;
+      line-height: 1.6;
+    }
+    #apikey-box a { color: #1de9b6; }
+    #apikey-input {
+      width: 100%;
+      background: #0d1a25;
+      border: 1px solid #0e2035;
+      border-radius: 6px;
+      color: #c8d8e8;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 12px;
+      padding: 10px 12px;
+      outline: none;
+      margin-bottom: 12px;
+    }
+    #apikey-input:focus { border-color: #1de9b6; }
+    #apikey-btn {
+      background: #1de9b6;
+      color: #060a0f;
+      border: none;
+      border-radius: 6px;
+      padding: 10px 24px;
+      font-family: 'Barlow', sans-serif;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      width: 100%;
+    }
+    #apikey-btn:hover { background: #0fd4a3; }
+  </style>
+</head>
+<body>
+
+  <div id="hud">
+    <div id="hud-logo">MARINEOPS // GLOBAL VESSEL TRACKER</div>
+    <div id="hud-stats">
+      <div class="stat"><div class="val" id="s-total">0</div><div class="lbl">Vessels</div></div>
+      <div class="stat"><div class="val" id="s-cargo">0</div><div class="lbl">Cargo</div></div>
+      <div class="stat"><div class="val" id="s-tanker">0</div><div class="lbl">Tankers</div></div>
+      <div class="stat"><div class="val" id="s-container">0</div><div class="lbl">Container</div></div>
+      <div class="stat"><div class="val" id="s-speed">— kn</div><div class="lbl">Avg Speed</div></div>
+    </div>
+    <div id="hud-right">
+      <div id="hud-time">--:--:-- UTC</div>
+      <div id="conn-status" class="connecting">CONNECTING...</div>
+    </div>
+  </div>
+
+  <div id="map">
+    <div id="map-el"></div>
+    <div id="grid-overlay"></div>
+    <div id="scan-line"></div>
+    <div id="legend">
+      <div class="leg-row"><div class="leg-dot" style="background:#1de9b6"></div>Cargo ship</div>
+      <div class="leg-row"><div class="leg-dot" style="background:#f59e0b"></div>Tanker</div>
+      <div class="leg-row"><div class="leg-dot" style="background:#60a5fa"></div>Container</div>
+      <div class="leg-row"><div class="leg-dot" style="background:#a78bfa"></div>Bulk carrier</div>
+      <div class="leg-row"><div class="leg-dot" style="background:#f472b6"></div>Passenger</div>
+      <div class="leg-row"><div class="leg-dot" style="background:#94a3b8"></div>Other</div>
+    </div>
+
+    <div id="apikey-overlay">
+      <div id="apikey-box">
+        <h2>AIS API KEY</h2>
+        <p>
+          Get a free API key from
+          <a href="https://aisstream.io" target="_blank">aisstream.io</a>
+          — sign up takes 30 seconds, no credit card needed.
+          <br><br>
+          Paste your key below to start receiving live ship data.
+        </p>
+        <input id="apikey-input" type="text" placeholder="Paste your aisstream.io API key here..." />
+        <button id="apikey-btn" onclick="startWithKey()">Connect to Live Feed</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="log-bar">
+    <div class="log-entry">> MARINEOPS SYSTEM READY — AWAITING API KEY</div>
+    <div class="log-entry">> GET FREE KEY AT AISSTREAM.IO</div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
